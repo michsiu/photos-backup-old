@@ -1,0 +1,163 @@
+name: Build Gallery
+
+on:
+  push:
+    paths:
+      - '**/*.jpg'
+      - '**/*.jpeg'
+      - '**/*.png'
+      - '**/*.webp'
+      - '**/*.JPG'
+      - '**/*.JPEG'
+      - '**/*.PNG'
+      - '**/*.WEBP'
+    paths-ignore:
+      - '.github/**'
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装图片处理工具
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+
+      - name: 创建必要目录
+        run: mkdir -p photos thumbs page
+
+      - name: 归档照片（按年分类）
+        shell: bash
+        run: |
+          shopt -s globstar nullglob
+
+          for img in **/*.jpg **/*.jpeg **/*.png **/*.webp **/*.JPG **/*.JPEG **/*.PNG **/*.WEBP; do
+
+            if [[ "$img" == photos/* ]] || [[ "$img" == thumbs/* ]]; then
+              continue
+            fi
+
+            [ -f "$img" ] || continue
+
+            sha256=$(sha256sum "$img" | cut -d' ' -f1 | head -c 16)
+
+            ext="${img##*.}"
+
+            exif_date=$(identify -format '%[EXIF:DateTimeOriginal]' "$img" 2>/dev/null || true)
+
+            if [ -n "$exif_date" ]; then
+              year=$(echo "$exif_date" | cut -d: -f1)
+            else
+              year=$(date -r "$img" +%Y)
+            fi
+
+            target_dir="photos/$year"
+
+            mkdir -p "$target_dir"
+
+            target="$target_dir/$sha256.$ext"
+
+            if [ -f "$target" ]; then
+              echo "重复文件，删除源文件: $img"
+              rm "$img"
+              continue
+            fi
+
+            mv "$img" "$target"
+
+            echo "归档: $img → $target"
+          done
+
+      - name: 生成缩略图
+        shell: bash
+        run: |
+          find photos/ -type f \( \
+            -iname "*.jpg" -o \
+            -iname "*.jpeg" -o \
+            -iname "*.png" -o \
+            -iname "*.webp" \
+          \) | while read img; do
+
+            relative_path="${img#photos/}"
+
+            thumb_path="thumbs/$relative_path"
+
+            thumb_dir=$(dirname "$thumb_path")
+
+            mkdir -p "$thumb_dir"
+
+            if [ ! -f "$thumb_path" ]; then
+
+              convert "$img" \
+                -strip \
+                -resize 400x \
+                -quality 80 \
+                "$thumb_path"
+
+              echo "缩略图: $relative_path"
+            fi
+          done
+
+      - name: 生成 photos.json
+        run: |
+          python3 << 'PY'
+import json
+import os
+
+photos = {}
+
+for root, dirs, files in os.walk('photos'):
+
+    for f in files:
+
+        if not f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+            continue
+
+        filepath = os.path.join(root, f)
+
+        relative_path = os.path.relpath(filepath, 'photos')
+
+        year = relative_path.split('/')[0]
+
+        sha256 = os.path.splitext(f)[0]
+
+        photos[sha256] = {
+            'filename': f,
+            'path': relative_path,
+            'url': f'/photos/{relative_path}',
+            'thumbnail': f'/thumbs/{relative_path}',
+            'year': year,
+            'date': year,
+            'sha256': sha256
+        }
+
+os.makedirs('page', exist_ok=True)
+
+with open('page/photos.json', 'w', encoding='utf-8') as f:
+    json.dump(photos, f, ensure_ascii=False, indent=2)
+
+print(f'生成 {len(photos)} 条记录')
+PY
+
+      - name: 提交所有更改
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add photos/ thumbs/ page/photos.json
+
+          git diff --staged --quiet || (
+            git commit -m "归档新照片并更新相册"
+            git push
+          )
