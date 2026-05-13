@@ -1,12 +1,77 @@
-name: Test Workflow
+name: 归档新照片
 
 on:
+  push:
+    paths:
+      - '*.jpg'
+      - '*.jpeg'
+      - '*.png'
+      - '*.webp'
+      - '*.JPG'
+      - '*.JPEG'
+      - '*.PNG'
+      - '*.WEBP'
   workflow_dispatch:
 
 jobs:
-  test:
+  build:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
-      - name: Hello
-        run: echo "Hello World"
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 ImageMagick
+        run: sudo apt-get install -y imagemagick
+
+      - name: 创建目录
+        run: mkdir -p photos thumbs page
+
+      - name: 归档根目录照片
+        run: |
+          for img in *.jpg *.jpeg *.png *.webp *.JPG *.JPEG *.PNG *.WEBP; do
+            [ -f "$img" ] || continue
+            sha=$(sha256sum "$img" | cut -d' ' -f1 | head -c 16)
+            ext="${img##*.}"
+            year=$(identify -format '%[EXIF:DateTimeOriginal]' "$img" 2>/dev/null | cut -d: -f1)
+            [ -z "$year" ] && year=$(date -r "$img" +%Y)
+            mkdir -p "photos/$year"
+            [ -f "photos/$year/$sha.$ext" ] && rm "$img" && continue
+            mv "$img" "photos/$year/$sha.$ext"
+            echo "归档: $img → photos/$year/$sha.$ext"
+          done
+
+      - name: 生成缩略图
+        run: |
+          find photos/ -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.webp" \) | while read f; do
+            rel="${f#photos/}"
+            t="thumbs/$rel"
+            mkdir -p "$(dirname "$t")"
+            [ -f "$t" ] || convert "$f" -resize 400x -quality 80 "$t"
+          done
+
+      - name: 生成 photos.json
+        run: |
+          python3 -c "
+import json, os
+data = {}
+for r,d,f in os.walk('photos'):
+    for n in f:
+        if n.lower().endswith(('.jpg','.jpeg','.png','.webp')):
+            p = os.path.join(r,n)
+            rel = os.path.relpath(p,'photos')
+            y = rel.split('/')[0]
+            k = os.path.splitext(n)[0]
+            data[k] = {'filename':n,'path':rel,'url':f'/photos/{rel}','thumbnail':f'/thumbs/{rel}','year':y,'date':y,'sha256':k}
+json.dump(data, open('page/photos.json','w'), ensure_ascii=False, indent=2)
+"
+
+      - name: 提交
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add photos/ thumbs/ page/photos.json
+          git diff --staged --quiet || (git commit -m "归档新照片" && git push)
