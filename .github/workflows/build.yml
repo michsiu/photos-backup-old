@@ -67,40 +67,40 @@ jobs:
           done
 
       - name: 生成 photos.json
-  run: |
-    python3 << 'PY'
-    import json, hashlib, os
-
-    photos = {}
-
-    for root, dirs, files in os.walk('photos'):
-        for f in files:
-            if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
-
-                filepath = os.path.join(root, f)
-
-                relative_path = os.path.relpath(filepath, 'photos')
-
-                year = relative_path.split('/')[0]
-
-                with open(filepath, 'rb') as img:
-                    sha256 = hashlib.sha256(img.read()).hexdigest()[:12]
-
-                photos[sha256] = {
-                    'filename': f,
-                    'path': relative_path,
-                    'url': f'/api/photo/{relative_path}',
-                    'thumbnail': f'/thumbs/{relative_path}',
-                    'year': year,
-                    'date': year,
-                    'sha256': sha256
-                }
-
-    with open('page/photos.json', 'w', encoding='utf-8') as f:
-        json.dump(photos, f, ensure_ascii=False, indent=2)
-
-    print(f'生成 {len(photos)} 条记录')
-    PY
+      run: |
+        python3 << 'PY'
+        import json, hashlib, os
+    
+        photos = {}
+    
+        for root, dirs, files in os.walk('photos'):
+            for f in files:
+                if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+    
+                    filepath = os.path.join(root, f)
+    
+                    relative_path = os.path.relpath(filepath, 'photos')
+    
+                    year = relative_path.split('/')[0]
+    
+                    with open(filepath, 'rb') as img:
+                        sha256 = hashlib.sha256(img.read()).hexdigest()[:12]
+    
+                    photos[sha256] = {
+                        'filename': f,
+                        'path': relative_path,
+                        'url': f'/api/photo/{relative_path}',
+                        'thumbnail': f'/thumbs/{relative_path}',
+                        'year': year,
+                        'date': year,
+                        'sha256': sha256
+                    }
+    
+        with open('page/photos.json', 'w', encoding='utf-8') as f:
+            json.dump(photos, f, ensure_ascii=False, indent=2)
+    
+        print(f'生成 {len(photos)} 条记录')
+        PY
 
       - name: 提交所有更改
         run: |
