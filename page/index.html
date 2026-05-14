@@ -21,7 +21,6 @@
   .lightbox { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 999; justify-content: center; align-items: center; }
   .lightbox.show { display: flex; }
   .lightbox img { max-width: 90%; max-height: 90%; border-radius: 8px; }
-  .info { text-align: center; padding: 10px; color: #888; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js"></script>
 </head>
@@ -75,11 +74,11 @@ function render(keys) {
     const div = document.createElement('div');
     div.className = 'item';
     const img = document.createElement('img');
-    img.src = p.thumbnail || p.url;
+    img.src = (p.thumbnail || p.url).replace('/photos/', '/api/photo/').replace('/thumbs/', '/api/photo/');
     img.alt = p.filename;
     img.loading = 'lazy';
     img.onclick = () => {
-      document.getElementById('lightbox-img').src = p.url;
+      document.getElementById('lightbox-img').src = p.url.replace('/photos/', '/api/photo/');
       document.getElementById('lightbox').classList.add('show');
     };
     div.appendChild(img);
