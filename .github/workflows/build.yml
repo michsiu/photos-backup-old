@@ -76,7 +76,7 @@ jobs:
 
                 if echo "$date_part" | grep -qE '^[0-9]{4}[-/][0-9]{2}[-/][0-9]{2}$'; then
 
-                  full_date=$(echo "$date_part" | sed 's/\//-/g')
+                  full_date=$(echo "$date_part" | cut -d' ' -f1 | sed 's/\//-/g')
 
                   year=$(echo "$full_date" | cut -d- -f1)
 
