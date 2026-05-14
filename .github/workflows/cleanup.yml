@@ -4,11 +4,15 @@ on:
   push:
     paths:
       - 'photos/**'
+
   workflow_dispatch:
 
 jobs:
   cleanup:
+    if: github.actor != 'github-actions[bot]'
+
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
 
@@ -21,40 +25,69 @@ jobs:
       - name: 获取被删文件列表
         run: |
           git diff --name-only --diff-filter=D HEAD~1 HEAD | grep -E '^photos/.*\.(jpg|jpeg|png|webp|JPG|JPEG|PNG|WEBP)$' > deleted.txt || true
-          cat deleted.txt
+          cat deleted.txt || true
 
       - name: 清理缩略图
         run: |
           while read file; do
+
             [ -z "$file" ] && continue
+
             thumb="thumbs/${file#photos/}"
-            [ -f "$thumb" ] && rm "$thumb" && echo "删除缩略图: $thumb"
+
+            if [ -f "$thumb" ]; then
+              rm "$thumb"
+              echo "删除缩略图: $thumb"
+            fi
+
           done < deleted.txt
+
           find thumbs/ -type d -empty -delete 2>/dev/null || true
 
       - name: 从 JSON 删除
         run: |
           while read file; do
+
             [ -z "$file" ] && continue
+
             rel="${file#photos/}"
-            python3 << PYEOF
+
+            REL_PATH="$rel" python3 - <<'PY'
 import json
-d = json.load(open('page/photos.json'))
-key = None
-for k,v in d.items():
-    if v['path'] == '$rel':
-        key = k
-        break
-if key:
-    del d[key]
-    print(f'从JSON删除: {key}')
-    json.dump(d, open('page/photos.json','w'), ensure_ascii=False, indent=2)
-PYEOF
+import os
+
+path = os.environ["REL_PATH"]
+
+try:
+    with open('page/photos.json', encoding='utf-8') as f:
+        data = json.load(f)
+except FileNotFoundError:
+    print('photos.json 不存在')
+    raise SystemExit(0)
+
+keys = [
+    k for k, v in data.items()
+    if v.get('path') == path
+]
+
+for k in keys:
+    del data[k]
+    print(f'从JSON删除: {k}')
+
+with open('page/photos.json', 'w', encoding='utf-8') as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+PY
+
           done < deleted.txt
 
-      - name: 提交
+      - name: 提交更改
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git add thumbs/ page/photos.json
-          git diff --staged --quiet || (git commit -m "清理已删除照片" && git push)
+
+          git diff --staged --quiet || (
+            git commit -m "清理已删除照片"
+            git push
+          )
