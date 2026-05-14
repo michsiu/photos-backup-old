@@ -79,5 +79,14 @@
     "year": "2026",
     "date": "2026-05-14",
     "sha256": "fb00081044c5"
+  },
+  "33f924e456f4.jpeg": {
+    "filename": "33f924e456f4.jpeg",
+    "path": "2026/33f924e456f4.jpeg",
+    "url": "/photos/2026/33f924e456f4.jpeg",
+    "thumbnail": "/thumbs/2026/33f924e456f4.jpeg",
+    "year": "2026",
+    "date": "2026-05-10",
+    "sha256": "33f924e456f4"
   }
 }
