@@ -1,22 +1,14 @@
 name: Build Gallery
 
 on:
-  push:
-    paths:
-      - '*.jpg'
-      - '*.jpeg'
-      - '*.png'
-      - '*.webp'
-      - '*.JPG'
-      - '*.JPEG'
-      - '*.PNG'
-      - '*.WEBP'
-
   workflow_dispatch:
+
+  schedule:
+    - cron: '*/5 * * * *'
 
 concurrency:
   group: gallery-process
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -30,35 +22,102 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: 安装图片处理工具
+      - name: 安装依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y imagemagick
+          sudo apt-get install -y imagemagick unzip
 
-      - name: 创建必要目录
+      - name: 创建目录
         run: |
+          mkdir -p incoming
           mkdir -p photos
           mkdir -p thumbs
           mkdir -p page
 
+      # =========================
+      # 解压 ZIP
+      # =========================
+      - name: 解压 ZIP 文件
+        run: |
+          shopt -s globstar nullglob
+
+          find incoming -type f -iname "*.zip" | while read zipfile; do
+
+            [ -f "$zipfile" ] || continue
+
+            extract_dir=$(mktemp -d)
+
+            echo "解压: $zipfile"
+
+            unzip -oq "$zipfile" -d "$extract_dir"
+
+            find "$extract_dir" -type f | while read extracted; do
+
+              ext="${extracted##*.}"
+
+              if echo "$ext" | grep -qiE '^(jpg|jpeg|png|webp)$'; then
+
+                base=$(basename "$extracted")
+
+                mv "$extracted" "incoming/$base"
+
+                echo "提取文件: $base"
+
+              fi
+
+            done
+
+            rm -rf "$extract_dir"
+
+            rm -f "$zipfile"
+
+            echo "删除 ZIP: $zipfile"
+
+          done
+
+      # =========================
+      # 处理图片
+      # =========================
       - name: 归档照片并更新 JSON
         run: |
           shopt -s nullglob
 
-          for img in *.jpg *.jpeg *.png *.webp *.JPG *.JPEG *.PNG *.WEBP; do
+          find incoming -type f \( \
+            -iname "*.jpg" -o \
+            -iname "*.jpeg" -o \
+            -iname "*.png" -o \
+            -iname "*.webp" \
+          \) | while read img; do
 
             [ -f "$img" ] || continue
 
-            sha256=$(sha256sum "$img" | cut -d' ' -f1 | head -c 12)
+            sha256=$(sha256sum "$img" | cut -d' ' -f1)
 
             ext="${img##*.}"
+
+            ext=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
+
+            # =========================
+            # 重复检测
+            # =========================
+            if find photos -type f | grep -q "/$sha256\."; then
+
+              echo "重复图片，跳过: $img"
+
+              rm -f "$img"
+
+              continue
+
+            fi
 
             hashname="$sha256.$ext"
 
             exif_date=$(identify -format '%[EXIF:DateTimeOriginal]' "$img" 2>/dev/null)
 
-            original_name="$img"
+            original_name=$(basename "$img")
 
             if [ -n "$exif_date" ]; then
 
@@ -68,11 +127,11 @@ jobs:
 
             else
 
-              if echo "$img" | grep -q '==boundary=='; then
+              if echo "$original_name" | grep -q '==boundary=='; then
 
-                date_part=$(echo "$img" | sed 's/==boundary==.*//')
+                date_part=$(echo "$original_name" | sed 's/==boundary==.*//')
 
-                original_name=$(echo "$img" | sed 's/.*==boundary==//')
+                original_name=$(echo "$original_name" | sed 's/.*==boundary==//')
 
                 if echo "$date_part" | grep -qE '^[0-9]{4}[-/][0-9]{2}[-/][0-9]{2} [0-9]{2}:[0-9]{2}$'; then
 
@@ -111,24 +170,23 @@ jobs:
             mv "$img" "$target_dir/$hashname"
 
             export ORIGINAL_NAME="$original_name"
-
             export HASH_NAME="$hashname"
-
             export YEAR="$year"
-
             export FULL_DATE="$full_date"
-
             export SHA256="$sha256"
 
             python3 scripts/build_entry.py
 
-            echo "归档: $img → $year/$hashname"
+            echo "归档: $original_name → $year/$hashname"
 
           done
 
+      # =========================
+      # 缩略图
+      # =========================
       - name: 生成缩略图
         run: |
-          find photos/ -type f \( \
+          find photos -type f \( \
             -iname "*.jpg" -o \
             -iname "*.jpeg" -o \
             -iname "*.png" -o \
@@ -153,28 +211,44 @@ jobs:
 
           done
 
+      # =========================
+      # 清理孤儿缩略图
+      # =========================
       - name: 清理多余缩略图
         run: |
-          find thumbs/ -type f | while read thumb; do
+          find thumbs -type f | while read thumb; do
 
             original="photos/${thumb#thumbs/}"
 
-            [ -f "$original" ] || rm "$thumb"
+            [ -f "$original" ] || rm -f "$thumb"
 
           done
 
-          find thumbs/ -type d -empty -delete 2>/dev/null || true
+          find thumbs -type d -empty -delete 2>/dev/null || true
 
-      - name: 提交所有更改
+      # =========================
+      # 提交
+      # =========================
+      - name: 提交更改
         run: |
           git config user.name "github-actions[bot]"
-
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add -A
 
-          git diff --staged --quiet || (
-            git commit -m "归档新照片并更新相册 [skip ci]"
-            git pull --rebase --autostash origin main
-            git push
+          git diff --cached --quiet && exit 0
+
+          git commit -m "更新相册 [skip ci]"
+
+          # =========================
+          # 保留你的 rebase 方案
+          # =========================
+          git fetch origin main
+
+          git rebase origin/main || (
+            git rebase --abort
+            echo "Rebase 冲突，等待下次定时任务重试"
+            exit 0
           )
+
+          git push
