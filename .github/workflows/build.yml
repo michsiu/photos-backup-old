@@ -74,7 +74,7 @@ jobs:
 
                 original_name=$(echo "$img" | sed 's/.*==boundary==//')
 
-                if echo "$date_part" | grep -qE '^[0-9]{4}[-/][0-9]{2}[-/][0-9]{2}$'; then
+                if echo "$date_part" | grep -qE '^[0-9]{4}[-/][0-9]{2}[-/][0-9]{2} [0-9]{2}:[0-9]{2}$'; then
 
                   full_date=$(echo "$date_part" | cut -d' ' -f1 | sed 's/\//-/g')
 
