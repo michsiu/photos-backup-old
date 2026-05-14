@@ -96,7 +96,7 @@ jobs:
                 # 移动文件到 incoming 目录
                 mv "$extracted" "incoming/"
                 echo "提取文件: $(basename "$extracted")"
-              fi
+
             done
 
             # 删除临时目录及其内容
