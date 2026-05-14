@@ -4,7 +4,7 @@ import os
 
 path = sys.argv[1]
 
-json_path = 'page/photos.json'
+json_path = 'photos.json'
 
 if not os.path.exists(json_path):
     print('photos.json 不存在')
