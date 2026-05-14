@@ -3,7 +3,7 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // CORS 预检什么
+    // CORS 预检
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
@@ -14,26 +14,40 @@ export default {
       });
     }
 
-    // API: 代理图片
-    if (path.startsWith('/api/photo/') && request.method === 'GET') {
-      const filePath = path.replace('/api/photo/', 'photos/');
-      const githubUrl = `https://raw.githubusercontent.com/${env.GITHUB_REPO}/${env.GITHUB_BRANCH}/${filePath}`;
-
+    // API: 获取 photos.json（从 GitHub 实时拉取，缓存 60 秒）
+    if (path === '/photos.json' && request.method === 'GET') {
+      const githubUrl = `https://raw.githubusercontent.com/${env.GITHUB_REPO}/${env.GITHUB_BRANCH}/photos.json`;
       const response = await fetch(githubUrl, {
         headers: {
           'Authorization': `token ${env.GITHUB_TOKEN}`,
           'User-Agent': 'Cloudflare-Worker'
         }
       });
+      if (!response.ok) return new Response('Not Found', { status: 404 });
+      const headers = new Headers(response.headers);
+      headers.set('Content-Type', 'application/json; charset=utf-8');
+      headers.set('Cache-Control', 'public, max-age=60');
+      headers.set('Access-Control-Allow-Origin', '*');
+      return new Response(response.body, { headers });
+    }
 
-      if (!response.ok) {
-        return new Response('Not Found', { status: 404 });
+    // API: 代理图片
+    if ((path.startsWith('/api/photo/') || path.startsWith('/photos/')) && request.method === 'GET') {
+      let filePath = path;
+      if (path.startsWith('/api/photo/')) {
+        filePath = path.replace('/api/photo/', 'photos/');
       }
-
+      const githubUrl = `https://raw.githubusercontent.com/${env.GITHUB_REPO}/${env.GITHUB_BRANCH}/${filePath}`;
+      const response = await fetch(githubUrl, {
+        headers: {
+          'Authorization': `token ${env.GITHUB_TOKEN}`,
+          'User-Agent': 'Cloudflare-Worker'
+        }
+      });
+      if (!response.ok) return new Response('Not Found', { status: 404 });
       const headers = new Headers(response.headers);
       headers.set('Cache-Control', 'public, max-age=31536000');
       headers.set('Access-Control-Allow-Origin', '*');
-
       return new Response(response.body, { headers });
     }
 
@@ -41,18 +55,11 @@ export default {
     if (path === '/api/upload' && request.method === 'POST') {
       const formData = await request.formData();
       const file = formData.get('file');
-      if (!file) {
-        return new Response(JSON.stringify({ error: 'No file' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-        });
-      }
-
+      if (!file) return new Response(JSON.stringify({ error: 'No file' }), { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
       const buffer = await file.arrayBuffer();
       const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
       const filename = file.name;
       const apiUrl = `https://api.github.com/repos/${env.GITHUB_REPO}/contents/${filename}`;
-
       const response = await fetch(apiUrl, {
         method: 'PUT',
         headers: {
@@ -60,52 +67,13 @@ export default {
           'Content-Type': 'application/json',
           'User-Agent': 'Cloudflare-Worker'
         },
-        body: JSON.stringify({
-          message: `Upload ${filename}`,
-          content: base64,
-          branch: env.GITHUB_BRANCH
-        })
+        body: JSON.stringify({ message: `Upload ${filename}`, content: base64, branch: env.GITHUB_BRANCH })
       });
-
-      if (!response.ok) {
-        return new Response(JSON.stringify({ error: 'Upload failed' }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-        });
-      }
-
-      return new Response(JSON.stringify({ success: true, filename }), {
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-      });
+      if (!response.ok) return new Response(JSON.stringify({ error: 'Upload failed' }), { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
+      return new Response(JSON.stringify({ success: true, filename }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
     }
 
-    // 静态文件: 从 GitHub 读取 page/ 目录下的文件
-    let filePath = path === '/' ? 'page/index.html' : `page${path}`;
-    const staticUrl = `https://raw.githubusercontent.com/${env.GITHUB_REPO}/${env.GITHUB_BRANCH}/${filePath}`;
-
-    const staticResponse = await fetch(staticUrl, {
-      headers: {
-        'Authorization': `token ${env.GITHUB_TOKEN}`,
-        'User-Agent': 'Cloudflare-Worker'
-      }
-    });
-
-    if (!staticResponse.ok) {
-      return new Response('Not Found', { status: 404 });
-    }
-
-    const headers = new Headers(staticResponse.headers);
-    headers.set('Access-Control-Allow-Origin', '*');
-
-    // 根据文件类型设置 Content-Type
-    if (filePath.endsWith('.html')) headers.set('Content-Type', 'text/html; charset=utf-8');
-    else if (filePath.endsWith('.css')) headers.set('Content-Type', 'text/css');
-    else if (filePath.endsWith('.js')) headers.set('Content-Type', 'application/javascript');
-    else if (filePath.endsWith('.json')) headers.set('Content-Type', 'application/json');
-    else if (filePath.endsWith('.png')) headers.set('Content-Type', 'image/png');
-    else if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) headers.set('Content-Type', 'image/jpeg');
-    else if (filePath.endsWith('.webp')) headers.set('Content-Type', 'image/webp');
-
-    return new Response(staticResponse.body, { headers });
+    // 其他所有请求交给 Assets 处理（index.html、upload.html、thumbs/）
+    return env.ASSETS.fetch(request);
   }
 };
