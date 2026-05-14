@@ -124,5 +124,14 @@
     "year": "2026",
     "date": "2026-04-23",
     "sha256": "9f0cc16f192f"
+  },
+  "ad5ad4b14a16.jpeg": {
+    "filename": "IMG_6743.jpeg",
+    "path": "2026/ad5ad4b14a16.jpeg",
+    "url": "/photos/2026/ad5ad4b14a16.jpeg",
+    "thumbnail": "/thumbs/2026/ad5ad4b14a16.jpeg",
+    "year": "2026",
+    "date": "2026-05-13",
+    "sha256": "ad5ad4b14a16"
   }
 }
