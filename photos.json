@@ -70,5 +70,23 @@
     "year": "2026",
     "date": "2026-05-14",
     "sha256": "7167b111e5f5"
+  },
+  "d022a37a52f2.jpeg": {
+    "filename": "IMG_5603.jpeg",
+    "path": "2026/d022a37a52f2.jpeg",
+    "url": "/photos/2026/d022a37a52f2.jpeg",
+    "thumbnail": "/thumbs/2026/d022a37a52f2.jpeg",
+    "year": "2026",
+    "date": "2026-05-14",
+    "sha256": "d022a37a52f2"
+  },
+  "bb238ebeb9cb.PNG": {
+    "filename": "5a6df0a912894057912f10d84ece4c22.jpeg~tplv-a9rns2rl98-image_raw_b.PNG",
+    "path": "2026/bb238ebeb9cb.PNG",
+    "url": "/photos/2026/bb238ebeb9cb.PNG",
+    "thumbnail": "/thumbs/2026/bb238ebeb9cb.PNG",
+    "year": "2026",
+    "date": "2026-05-14",
+    "sha256": "bb238ebeb9cb"
   }
 }
