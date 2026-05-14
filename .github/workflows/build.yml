@@ -11,11 +11,15 @@ on:
       - '*.JPEG'
       - '*.PNG'
       - '*.WEBP'
-
   workflow_dispatch:
+
+concurrency:
+  group: build-gallery
+  cancel-in-progress: false
 
 jobs:
   build:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -55,6 +59,9 @@ jobs:
             echo "归档: $img → $year/$sha256.$ext"
           done
 
+      - name: 复制映射表到 page
+        run: cp filemap.txt page/filemap.txt
+
       - name: 生成缩略图
         run: |
           find photos/ -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.webp" \) | while read img; do
@@ -79,50 +86,65 @@ jobs:
       - name: 生成 photos.json
         run: |
           python3 << 'PY'
-          import json, hashlib, os
+import json
+import os
+import subprocess
+from datetime import datetime
 
-          mapping = {}
-          try:
-              with open('filemap.txt') as f:
-                  for line in f:
-                      line = line.strip()
-                      if '|' in line:
-                          hashname, original = line.split('|', 1)
-                          mapping[hashname] = original
-          except:
-              pass
+mapping = {}
+try:
+    with open('filemap.txt') as f:
+        for line in f:
+            line = line.strip()
+            if '|' in line:
+                hashname, original = line.split('|', 1)
+                mapping[hashname] = original
+except:
+    pass
 
-          photos = {}
+photos = {}
 
-          for root, dirs, files in os.walk('photos'):
-              for f in files:
-                  if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+for root, dirs, files in os.walk('photos'):
+    for f in files:
+        if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+            filepath = os.path.join(root, f)
+            relative_path = os.path.relpath(filepath, 'photos')
+            year = relative_path.split('/')[0]
 
-                      filepath = os.path.join(root, f)
+            full_date = ''
+            try:
+                exif_date = subprocess.check_output(
+                    ['identify', '-format', '%[EXIF:DateTimeOriginal]', filepath],
+                    stderr=subprocess.DEVNULL
+                ).decode().strip()
+                if exif_date:
+                    full_date = exif_date.split(' ')[0].replace(':', '-')
+            except:
+                pass
 
-                      relative_path = os.path.relpath(filepath, 'photos')
+            if not full_date:
+                mtime = os.path.getmtime(filepath)
+                full_date = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
 
-                      year = relative_path.split('/')[0]
+            photos[f] = {
+                'filename': mapping.get(f, f),
+                'path': relative_path,
+                'url': f'/photos/{relative_path}',
+                'thumbnail': f'/thumbs/{relative_path}',
+                'year': year,
+                'date': full_date,
+                'sha256': os.path.splitext(f)[0]
+            }
 
-                      photos[f] = {
-                          'filename': mapping.get(f, f),
-                          'path': relative_path,
-                          'url': f'/photos/{relative_path}',
-                          'thumbnail': f'/thumbs/{relative_path}',
-                          'year': year,
-                          'date': year,
-                          'sha256': os.path.splitext(f)[0]
-                      }
+with open('page/photos.json', 'w', encoding='utf-8') as f:
+    json.dump(photos, f, ensure_ascii=False, indent=2)
 
-          with open('page/photos.json', 'w', encoding='utf-8') as f:
-              json.dump(photos, f, ensure_ascii=False, indent=2)
-
-          print(f'生成 {len(photos)} 条记录')
-          PY
+print(f'生成 {len(photos)} 条记录')
+PY
 
       - name: 提交所有更改
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add photos/ thumbs/ page/photos.json
+          git add photos/ thumbs/ page/photos.json page/filemap.txt
           git diff --staged --quiet || (git commit -m "归档新照片并更新相册 [skip ci]" && git push)
