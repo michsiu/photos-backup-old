@@ -1,63 +1,129 @@
+name: Build Gallery
+
+on:
+  push:
+    paths:
+      - '*.jpg'
+      - '*.jpeg'
+      - '*.png'
+      - '*.webp'
+      - '*.JPG'
+      - '*.JPEG'
+      - '*.PNG'
+      - '*.WEBP'
+
+  workflow_dispatch:
+
+concurrency:
+  group: build-gallery
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装图片处理工具
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+
+      - name: 创建必要目录
+        run: |
+          mkdir -p photos
+          mkdir -p thumbs
+          mkdir -p page
+
+      - name: 归档照片
+        run: |
+          shopt -s nullglob
+
+          for img in *.jpg *.jpeg *.png *.webp *.JPG *.JPEG *.PNG *.WEBP; do
+
+            [ -f "$img" ] || continue
+
+            sha256=$(sha256sum "$img" | cut -d' ' -f1 | head -c 12)
+
+            ext="${img##*.}"
+
+            exif_date=$(identify -format '%[EXIF:DateTimeOriginal]' "$img" 2>/dev/null)
+
+            if [ -n "$exif_date" ]; then
+              year=$(echo "$exif_date" | cut -d: -f1)
+            else
+              year=$(date -r "$img" +%Y)
+            fi
+
+            target_dir="photos/$year"
+
+            mkdir -p "$target_dir"
+
+            mv "$img" "$target_dir/$sha256.$ext"
+
+            echo "归档: $img -> $year/$sha256.$ext"
+
+          done
+
+      - name: 生成缩略图
+        run: |
+          find photos/ -type f \( \
+            -iname "*.jpg" -o \
+            -iname "*.jpeg" -o \
+            -iname "*.png" -o \
+            -iname "*.webp" \
+          \) | while read img; do
+
+            relative_path="${img#photos/}"
+
+            thumb_path="thumbs/$relative_path"
+
+            thumb_dir=$(dirname "$thumb_path")
+
+            mkdir -p "$thumb_dir"
+
+            if [ ! -f "$thumb_path" ]; then
+
+              convert "$img" -resize 400x -quality 80 "$thumb_path"
+
+              echo "缩略图: $relative_path"
+
+            fi
+
+          done
+
+      - name: 清理多余缩略图
+        run: |
+          find thumbs/ -type f | while read thumb; do
+
+            original="photos/${thumb#thumbs/}"
+
+            [ -f "$original" ] || rm "$thumb"
+
+          done
+
+          find thumbs/ -type d -empty -delete 2>/dev/null || true
+
       - name: 生成 photos.json
         run: |
-          python3 <<'PY'
-          import json
-          import os
-          import subprocess
-          from datetime import datetime
+          python3 scripts/build_photos_json.py
 
-          photos = {}
+      - name: 提交所有更改
+        run: |
+          git config user.name "github-actions[bot]"
 
-          for root, dirs, files in os.walk('photos'):
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-              for f in files:
+          git add -A
 
-                  if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
-
-                      filepath = os.path.join(root, f)
-
-                      relative_path = os.path.relpath(filepath, 'photos')
-
-                      year = relative_path.split('/')[0]
-
-                      full_date = ''
-
-                      try:
-                          exif_date = subprocess.check_output(
-                              [
-                                  'identify',
-                                  '-format',
-                                  '%[EXIF:DateTimeOriginal]',
-                                  filepath
-                              ],
-                              stderr=subprocess.DEVNULL
-                          ).decode().strip()
-
-                          if exif_date:
-                              full_date = exif_date.split(' ')[0].replace(':', '-')
-
-                      except:
-                          pass
-
-                      if not full_date:
-                          mtime = os.path.getmtime(filepath)
-
-                          full_date = datetime.fromtimestamp(
-                              mtime
-                          ).strftime('%Y-%m-%d')
-
-                      photos[f] = {
-                          'filename': f,
-                          'path': relative_path,
-                          'url': f'/photos/{relative_path}',
-                          'thumbnail': f'/thumbs/{relative_path}',
-                          'year': year,
-                          'date': full_date,
-                          'sha256': os.path.splitext(f)[0]
-                      }
-
-          with open('page/photos.json', 'w', encoding='utf-8') as f:
-              json.dump(photos, f, ensure_ascii=False, indent=2)
-
-          print(f'生成 {len(photos)} 条记录')
-          PY
+          git diff --staged --quiet || (
+            git commit -m "归档新照片并更新相册 [skip ci]"
+            git push
+          )
