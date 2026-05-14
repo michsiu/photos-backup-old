@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'photos/**'
+
   workflow_dispatch:
 
 concurrency:
@@ -13,7 +14,9 @@ concurrency:
 jobs:
   cleanup:
     if: github.actor != 'github-actions[bot]'
+
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
 
@@ -26,45 +29,50 @@ jobs:
       - name: 获取被删文件列表
         run: |
           git diff --name-only --diff-filter=D HEAD~1 HEAD | grep -E '^photos/.*\.(jpg|jpeg|png|webp|JPG|JPEG|PNG|WEBP)$' > deleted.txt || true
+
           cat deleted.txt || true
 
       - name: 清理缩略图
         run: |
           while read file; do
+
             [ -z "$file" ] && continue
+
             thumb="thumbs/${file#photos/}"
+
             if [ -f "$thumb" ]; then
+
               rm "$thumb"
+
               echo "删除缩略图: $thumb"
+
             fi
+
           done < deleted.txt
+
           find thumbs/ -type d -empty -delete 2>/dev/null || true
 
       - name: 从 JSON 删除
         run: |
           while read file; do
+
             [ -z "$file" ] && continue
+
             rel="${file#photos/}"
-            python3 -c "
-import json
-with open('page/photos.json') as f:
-    d = json.load(f)
-key = None
-for k, v in d.items():
-    if v['path'] == '$rel':
-        key = k
-        break
-if key:
-    del d[key]
-    print(f'从JSON删除: {key}')
-    with open('page/photos.json', 'w') as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
-"
+
+            python3 scripts/cleanup.py "$rel"
+
           done < deleted.txt
 
       - name: 提交更改
         run: |
           git config user.name "github-actions[bot]"
+
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add thumbs/ page/photos.json
-          git diff --staged --quiet || (git commit -m "清理已删除照片 [skip ci]" && git push)
+
+          git add -A
+
+          git diff --staged --quiet || (
+            git commit -m "清理已删除照片 [skip ci]"
+            git push
+          )
