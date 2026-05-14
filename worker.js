@@ -3,7 +3,7 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // CORS 预检
+    // CORS 预检什么
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
