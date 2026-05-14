@@ -32,22 +32,25 @@ jobs:
 
       - name: 归档照片（按年分类，重命名为 sha256）
         run: |
+          > filemap.txt
           for img in *.jpg *.jpeg *.png *.webp *.JPG *.JPEG *.PNG *.WEBP; do
             [ -f "$img" ] || continue
-            
+
             sha256=$(sha256sum "$img" | cut -d' ' -f1 | head -c 12)
             ext="${img##*.}"
-            
+
             exif_date=$(identify -format '%[EXIF:DateTimeOriginal]' "$img" 2>/dev/null)
             if [ -n "$exif_date" ]; then
               year=$(echo "$exif_date" | cut -d: -f1)
             else
               year=$(date -r "$img" +%Y)
             fi
-            
+
             target_dir="photos/$year"
             mkdir -p "$target_dir"
-            
+
+            echo "$sha256.$ext|$img" >> filemap.txt
+
             mv "$img" "$target_dir/$sha256.$ext"
             echo "归档: $img → $year/$sha256.$ext"
           done
@@ -65,39 +68,55 @@ jobs:
             fi
           done
 
+      - name: 清理多余缩略图
+        run: |
+          find thumbs/ -type f | while read thumb; do
+            original="photos/${thumb#thumbs/}"
+            [ -f "$original" ] || rm "$thumb"
+          done
+          find thumbs/ -type d -empty -delete 2>/dev/null || true
+
       - name: 生成 photos.json
         run: |
           python3 << 'PY'
           import json, hashlib, os
-      
+
+          mapping = {}
+          try:
+              with open('filemap.txt') as f:
+                  for line in f:
+                      line = line.strip()
+                      if '|' in line:
+                          hashname, original = line.split('|', 1)
+                          mapping[hashname] = original
+          except:
+              pass
+
           photos = {}
-      
+
           for root, dirs, files in os.walk('photos'):
               for f in files:
                   if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
-      
+
                       filepath = os.path.join(root, f)
-      
+
                       relative_path = os.path.relpath(filepath, 'photos')
-      
+
                       year = relative_path.split('/')[0]
-      
-                      with open(filepath, 'rb') as img:
-                          sha256 = hashlib.sha256(img.read()).hexdigest()[:12]
-      
-                      photos[sha256] = {
-                          'filename': f,
+
+                      photos[f] = {
+                          'filename': mapping.get(f, f),
                           'path': relative_path,
-                          'url': f'/api/photo/{relative_path}',
+                          'url': f'/photos/{relative_path}',
                           'thumbnail': f'/thumbs/{relative_path}',
                           'year': year,
                           'date': year,
-                          'sha256': sha256
+                          'sha256': os.path.splitext(f)[0]
                       }
-      
+
           with open('page/photos.json', 'w', encoding='utf-8') as f:
               json.dump(photos, f, ensure_ascii=False, indent=2)
-      
+
           print(f'生成 {len(photos)} 条记录')
           PY
 
