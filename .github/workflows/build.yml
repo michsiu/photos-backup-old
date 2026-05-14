@@ -4,11 +4,116 @@ on:
   push:
     paths:
       - '*.jpg'
+      - '*.jpeg'
+      - '*.png'
+      - '*.webp'
+      - '*.JPG'
+      - '*.JPEG'
+      - '*.PNG'
+      - '*.WEBP'
   workflow_dispatch:
+
+concurrency:
+  group: build-gallery
+  cancel-in-progress: false
 
 jobs:
   build:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-      - name: test
-        run: echo "ok"
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装图片处理工具
+        run: sudo apt-get install -y imagemagick
+
+      - name: 创建必要目录
+        run: mkdir -p photos thumbs page
+
+      - name: 归档照片并更新 JSON
+        run: |
+          for img in *.jpg *.jpeg *.png *.webp *.JPG *.JPEG *.PNG *.WEBP; do
+            [ -f "$img" ] || continue
+
+            sha256=$(sha256sum "$img" | cut -d' ' -f1 | head -c 12)
+            ext="${img##*.}"
+            hashname="$sha256.$ext"
+
+            exif_date=$(identify -format '%[EXIF:DateTimeOriginal]' "$img" 2>/dev/null)
+            if [ -n "$exif_date" ]; then
+              year=$(echo "$exif_date" | cut -d: -f1)
+              full_date=$(echo "$exif_date" | cut -d' ' -f1 | tr ':' '-')
+            else
+              year=$(date -r "$img" +%Y)
+              full_date=$(date -r "$img" +%Y-%m-%d)
+            fi
+
+            target_dir="photos/$year"
+            mkdir -p "$target_dir"
+            mv "$img" "$target_dir/$hashname"
+
+            export ORIGINAL_NAME="$img"
+            export HASH_NAME="$hashname"
+            export YEAR="$year"
+            export FULL_DATE="$full_date"
+            export SHA256="$sha256"
+
+            python3 << 'PYEOF'
+import json, os
+
+entry = {
+    "filename": os.environ['ORIGINAL_NAME'],
+    "path": f"{os.environ['YEAR']}/{os.environ['HASH_NAME']}",
+    "url": f"/photos/{os.environ['YEAR']}/{os.environ['HASH_NAME']}",
+    "thumbnail": f"/thumbs/{os.environ['YEAR']}/{os.environ['HASH_NAME']}",
+    "year": os.environ['YEAR'],
+    "date": os.environ['FULL_DATE'],
+    "sha256": os.environ['SHA256']
+}
+
+json_path = "page/photos.json"
+if os.path.exists(json_path):
+    with open(json_path) as f:
+        data = json.load(f)
+else:
+    data = {}
+
+data[os.environ['HASH_NAME']] = entry
+
+with open(json_path, "w") as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+PYEOF
+            echo "归档: $img → $year/$hashname"
+          done
+
+      - name: 生成缩略图
+        run: |
+          find photos/ -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.webp" \) | while read img; do
+            relative_path="${img#photos/}"
+            thumb_path="thumbs/$relative_path"
+            thumb_dir=$(dirname "$thumb_path")
+            mkdir -p "$thumb_dir"
+            if [ ! -f "$thumb_path" ]; then
+              convert "$img" -resize 400x -quality 80% "$thumb_path"
+              echo "缩略图: $relative_path"
+            fi
+          done
+
+      - name: 清理多余缩略图
+        run: |
+          find thumbs/ -type f | while read thumb; do
+            original="photos/${thumb#thumbs/}"
+            [ -f "$original" ] || rm "$thumb"
+          done
+          find thumbs/ -type d -empty -delete 2>/dev/null || true
+
+      - name: 提交所有更改
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add photos/ thumbs/ page/photos.json
+          git diff --staged --quiet || (git commit -m "归档新照片并更新相册 [skip ci]" && git push)
