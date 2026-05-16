@@ -1,0 +1,28 @@
+name: Clear Photos
+
+on:
+  workflow_dispatch:
+
+jobs:
+  clear:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 清空 photos 目录
+        run: |
+          rm -rf photos/*
+          rm -rf thumbs/*
+          
+      - name: 提交更改
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "清空 photos 目录 [skip ci]"
+          git push
